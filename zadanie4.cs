@@ -1,113 +1,139 @@
 using System;
 
-class NeuralNetwork
+public class Neuron
 {
-    static Random rand = new Random();
+    public double[] Weights;
+    public double Bias;
+    public double Output;
+    public double Delta;
 
-    const int inputSize = 2;
-    const int hiddenSize = 2;
-    const double learningRate = 0.1;
-    const int epochs = 20000;
-
-    static double[,] weightsInputHidden = new double[hiddenSize, inputSize + 1];
-    static double[] weightsHiddenOutput = new double[hiddenSize + 1];
-
-    static double Sigmoid(double x) => 1.0 / (1.0 + Math.Exp(-x));
-    static double SigmoidDerivative(double x) => x * (1 - x);
-
-    static void Main()
+    public Neuron(int inputCount, Random rand)
     {
-        double[][] trainingData = new double[][]
+        Weights = new double[inputCount];
+        for (int i = 0; i < inputCount; i++)
+            Weights[i] = rand.NextDouble() * 2 - 1;
+
+        Bias = rand.NextDouble() * 2 - 1;
+    }
+
+    public double Activate(double[] inputs)
+    {
+        double sum = Bias;
+        for (int i = 0; i < inputs.Length; i++)
+            sum += inputs[i] * Weights[i];
+
+        Output = 1.0 / (1.0 + Math.Exp(-sum));
+        return Output;
+    }
+
+    public double SigmoidDerivative()
+    {
+        return Output * (1 - Output);
+    }
+}
+
+public class Layer
+{
+    public Neuron[] Neurons;
+
+    public Layer(int neuronCount, int inputCount, Random rand)
+    {
+        Neurons = new Neuron[neuronCount];
+        for (int i = 0; i < neuronCount; i++)
+            Neurons[i] = new Neuron(inputCount, rand);
+    }
+
+    public double[] FeedForward(double[] inputs)
+    {
+        double[] outputs = new double[Neurons.Length];
+        for (int i = 0; i < Neurons.Length; i++)
+            outputs[i] = Neurons[i].Activate(inputs);
+        return outputs;
+    }
+}
+
+public class NeuralNetwork
+{
+    private Layer Hidden;
+    private Neuron OutputNeuron;
+    private double LearningRate = 0.1;
+
+    public NeuralNetwork(Random rand)
+    {
+        Hidden = new Layer(2, 2, rand);
+        OutputNeuron = new Neuron(2, rand);
+    }
+
+    public double FeedForward(double[] inputs)
+    {
+        double[] hiddenOutputs = Hidden.FeedForward(inputs);
+        return OutputNeuron.Activate(hiddenOutputs);
+    }
+
+    public void Train(double[] inputs, double target)
+    {
+        double output = FeedForward(inputs);
+
+        double error = target - output;
+        OutputNeuron.Delta = error * OutputNeuron.SigmoidDerivative();
+
+        for (int i = 0; i < Hidden.Neurons.Length; i++)
         {
-            new double[] {0, 0, 0},
-            new double[] {0, 1, 1},
-            new double[] {1, 0, 1},
-            new double[] {1, 1, 0}
+            Neuron h = Hidden.Neurons[i];
+            h.Delta = OutputNeuron.Delta * OutputNeuron.Weights[i] * h.SigmoidDerivative();
+        }
+
+        for (int i = 0; i < OutputNeuron.Weights.Length; i++)
+            OutputNeuron.Weights[i] += LearningRate * OutputNeuron.Delta * Hidden.Neurons[i].Output;
+
+        OutputNeuron.Bias += LearningRate * OutputNeuron.Delta;
+
+        for (int i = 0; i < Hidden.Neurons.Length; i++)
+        {
+            for (int j = 0; j < Hidden.Neurons[i].Weights.Length; j++)
+                Hidden.Neurons[i].Weights[j] += LearningRate * Hidden.Neurons[i].Delta * inputs[j];
+
+            Hidden.Neurons[i].Bias += LearningRate * Hidden.Neurons[i].Delta;
+        }
+
+    }
+}
+
+public class Program
+{
+    public static void Main()
+    {
+        var rand = new Random();
+        var nn = new NeuralNetwork(rand);
+
+        double[][] inputs = {
+            new double[] { 0, 0 },
+            new double[] { 0, 1 },
+            new double[] { 1, 0 },
+            new double[] { 1, 1 }
         };
+        double[] targets = { 0, 1, 1, 0 };
 
-        InitWeights();
-
-        for (int epoch = 0; epoch < epochs; epoch++)
+        for (int epoch = 0; epoch < 50000; epoch++)
         {
-            double totalError = 0.0;
+            double totalError = 0;
 
-            foreach (var data in trainingData)
+            for (int i = 0; i < inputs.Length; i++)
             {
-                double[] input = { data[0], data[1] };
-                double expected = data[2];
-
-                double[] hiddenOutputs = new double[hiddenSize];
-                for (int i = 0; i < hiddenSize; i++)
-                {
-                    double sum = weightsInputHidden[i, inputSize];
-                    for (int j = 0; j < inputSize; j++)
-                        sum += weightsInputHidden[i, j] * input[j];
-                    hiddenOutputs[i] = Sigmoid(sum);
-                }
-
-                double sumOutput = weightsHiddenOutput[hiddenSize];
-                for (int i = 0; i < hiddenSize; i++)
-                    sumOutput += weightsHiddenOutput[i] * hiddenOutputs[i];
-                double output = Sigmoid(sumOutput);
-
-                double error = expected - output;
-                totalError += Math.Abs(error);
-
-                double deltaOutput = error * SigmoidDerivative(output);
-                double[] deltaHidden = new double[hiddenSize];
-                for (int i = 0; i < hiddenSize; i++)
-                    deltaHidden[i] = deltaOutput * weightsHiddenOutput[i] * SigmoidDerivative(hiddenOutputs[i]);
-
-
-                for (int i = 0; i < hiddenSize; i++)
-                    weightsHiddenOutput[i] += learningRate * deltaOutput * hiddenOutputs[i];
-                weightsHiddenOutput[hiddenSize] += learningRate * deltaOutput * 1.0;
-
-                for (int i = 0; i < hiddenSize; i++)
-                {
-                    for (int j = 0; j < inputSize; j++)
-                        weightsInputHidden[i, j] += learningRate * deltaHidden[i] * input[j];
-                    weightsInputHidden[i, inputSize] += learningRate * deltaHidden[i] * 1.0;
-                }
+                nn.Train(inputs[i], targets[i]);
+                double output = nn.FeedForward(inputs[i]);
+                double error = Math.Pow(targets[i] - output, 2);
+                totalError += error;
             }
 
-            if (epoch % 1000 == 0)
-                Console.WriteLine($"Epoka {epoch}, błąd całkowity: {totalError:F4}");
+            Console.WriteLine($"Epoka {epoch + 1}, błąd sumaryczny: {Math.Round(totalError, 6)}");
         }
 
-        Console.WriteLine("\nTest sieci:");
-        foreach (var data in trainingData)
+        Console.WriteLine("Wyniki sieci XOR po treningu:");
+        for (int i = 0; i < inputs.Length; i++)
         {
-            double[] input = { data[0], data[1] };
-            double result = Predict(input);
-            Console.WriteLine($"{input[0]} {input[1]} = {result:F4}");
+            double output = nn.FeedForward(inputs[i]);
+            Console.WriteLine($"{inputs[i][0]} XOR {inputs[i][1]} = {Math.Round(output, 4)}");
         }
-    }
-
-    static void InitWeights()
-    {
-        for (int i = 0; i < hiddenSize; i++)
-            for (int j = 0; j <= inputSize; j++)
-                weightsInputHidden[i, j] = rand.NextDouble() * 2 - 1;
-
-        for (int i = 0; i <= hiddenSize; i++)
-            weightsHiddenOutput[i] = rand.NextDouble() * 2 - 1;
-    }
-
-    static double Predict(double[] input)
-    {
-        double[] hiddenOutputs = new double[hiddenSize];
-        for (int i = 0; i < hiddenSize; i++)
-        {
-            double sum = weightsInputHidden[i, inputSize];
-            for (int j = 0; j < inputSize; j++)
-                sum += weightsInputHidden[i, j] * input[j];
-            hiddenOutputs[i] = Sigmoid(sum);
-        }
-
-        double sumOutput = weightsHiddenOutput[hiddenSize];
-        for (int i = 0; i < hiddenSize; i++)
-            sumOutput += weightsHiddenOutput[i] * hiddenOutputs[i];
-        return Sigmoid(sumOutput);
     }
 }

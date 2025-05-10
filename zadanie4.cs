@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 public class Neuron
 {
@@ -12,7 +13,6 @@ public class Neuron
         Weights = new double[inputCount];
         for (int i = 0; i < inputCount; i++)
             Weights[i] = rand.NextDouble() * 2 - 1;
-
         Bias = rand.NextDouble() * 2 - 1;
     }
 
@@ -21,7 +21,6 @@ public class Neuron
         double sum = Bias;
         for (int i = 0; i < inputs.Length; i++)
             sum += inputs[i] * Weights[i];
-
         Output = 1.0 / (1.0 + Math.Exp(-sum));
         return Output;
     }
@@ -54,48 +53,76 @@ public class Layer
 
 public class NeuralNetwork
 {
-    private Layer Hidden;
-    private Neuron OutputNeuron;
+    private List<Layer> Layers = new();
     private double LearningRate = 0.1;
 
-    public NeuralNetwork(Random rand)
+    public NeuralNetwork(int[] layerSizes, Random rand)
     {
-        Hidden = new Layer(2, 2, rand);
-        OutputNeuron = new Neuron(2, rand);
+        for (int i = 1; i < layerSizes.Length; i++)
+        {
+            int inputCount = layerSizes[i - 1];
+            int neuronCount = layerSizes[i];
+            Layers.Add(new Layer(neuronCount, inputCount, rand));
+        }
+    }
+    public double[] FeedForward(double[] inputs)
+    {
+        double[] outputs = inputs;
+        foreach (var layer in Layers)
+            outputs = layer.FeedForward(outputs);
+        return outputs;
     }
 
-    public double FeedForward(double[] inputs)
+    public void Train(double[] inputs, double[] targets)
     {
-        double[] hiddenOutputs = Hidden.FeedForward(inputs);
-        return OutputNeuron.Activate(hiddenOutputs);
+        double[] outputs = FeedForward(inputs);
+
+        Layer outputLayer = Layers[^1];
+        for (int i = 0; i < outputLayer.Neurons.Length; i++)
+        {
+            double error = targets[i] - outputLayer.Neurons[i].Output;
+            outputLayer.Neurons[i].Delta = error * outputLayer.Neurons[i].SigmoidDerivative();
+        }
+
+        for (int l = Layers.Count - 2; l >= 0; l--)
+        {
+            Layer current = Layers[l];
+            Layer next = Layers[l + 1];
+            for (int i = 0; i < current.Neurons.Length; i++)
+            {
+                double sum = 0.0;
+                for (int j = 0; j < next.Neurons.Length; j++)
+                    sum += next.Neurons[j].Weights[i] * next.Neurons[j].Delta;
+
+                current.Neurons[i].Delta = sum * current.Neurons[i].SigmoidDerivative();
+            }
+        }
+
+        double[] prevOutputs = inputs;
+        for (int l = 0; l < Layers.Count; l++)
+        {
+            Layer layer = Layers[l];
+
+            if (l > 0)
+            {
+                prevOutputs = new double[Layers[l - 1].Neurons.Length];
+                for (int n = 0; n < Layers[l - 1].Neurons.Length; n++)
+                    prevOutputs[n] = Layers[l - 1].Neurons[n].Output;
+            }
+
+            foreach (var neuron in layer.Neurons)
+            {
+                for (int w = 0; w < neuron.Weights.Length; w++)
+                    neuron.Weights[w] += LearningRate * neuron.Delta * prevOutputs[w];
+
+                neuron.Bias += LearningRate * neuron.Delta;
+            }
+        }
     }
 
-    public void Train(double[] inputs, double target)
+    public double[] Predict(double[] inputs)
     {
-        double output = FeedForward(inputs);
-
-        double error = target - output;
-        OutputNeuron.Delta = error * OutputNeuron.SigmoidDerivative();
-
-        for (int i = 0; i < Hidden.Neurons.Length; i++)
-        {
-            Neuron h = Hidden.Neurons[i];
-            h.Delta = OutputNeuron.Delta * OutputNeuron.Weights[i] * h.SigmoidDerivative();
-        }
-
-        for (int i = 0; i < OutputNeuron.Weights.Length; i++)
-            OutputNeuron.Weights[i] += LearningRate * OutputNeuron.Delta * Hidden.Neurons[i].Output;
-
-        OutputNeuron.Bias += LearningRate * OutputNeuron.Delta;
-
-        for (int i = 0; i < Hidden.Neurons.Length; i++)
-        {
-            for (int j = 0; j < Hidden.Neurons[i].Weights.Length; j++)
-                Hidden.Neurons[i].Weights[j] += LearningRate * Hidden.Neurons[i].Delta * inputs[j];
-
-            Hidden.Neurons[i].Bias += LearningRate * Hidden.Neurons[i].Delta;
-        }
-
+        return FeedForward(inputs);
     }
 }
 
@@ -104,7 +131,9 @@ public class Program
     public static void Main()
     {
         var rand = new Random();
-        var nn = new NeuralNetwork(rand);
+
+        int[] structure = { 2, 2, 1 };
+        var nn = new NeuralNetwork(structure, rand);
 
         double[][] inputs = {
             new double[] { 0, 0 },
@@ -112,28 +141,32 @@ public class Program
             new double[] { 1, 0 },
             new double[] { 1, 1 }
         };
-        double[] targets = { 0, 1, 1, 0 };
+        double[][] targets = {
+            new double[] { 0 },
+            new double[] { 1 },
+            new double[] { 1 },
+            new double[] { 0 }
+        };
 
-        for (int epoch = 0; epoch < 50000; epoch++)
+
+        for (int epoch = 0; epoch < 30000; epoch++)
         {
             double totalError = 0;
-
             for (int i = 0; i < inputs.Length; i++)
             {
                 nn.Train(inputs[i], targets[i]);
-                double output = nn.FeedForward(inputs[i]);
-                double error = Math.Pow(targets[i] - output, 2);
-                totalError += error;
+                var output = nn.Predict(inputs[i]);
+                totalError += Math.Pow(targets[i][0] - output[0], 2);
             }
-
-            Console.WriteLine($"Epoka {epoch + 1}, błąd sumaryczny: {Math.Round(totalError, 6)}");
+            Console.WriteLine($"Epoka {epoch + 1}, błąd: {Math.Round(totalError, 6)}");
         }
 
-        Console.WriteLine("Wyniki sieci XOR po treningu:");
+
+        Console.WriteLine("\nPredykcja:");
         for (int i = 0; i < inputs.Length; i++)
         {
-            double output = nn.FeedForward(inputs[i]);
-            Console.WriteLine($"{inputs[i][0]} XOR {inputs[i][1]} = {Math.Round(output, 4)}");
+            var output = nn.Predict(inputs[i]);
+            Console.WriteLine($"{inputs[i][0]} XOR {inputs[i][1]} = {Math.Round(output[0], 4)}");
         }
     }
 }
